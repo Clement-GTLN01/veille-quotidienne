@@ -17,7 +17,6 @@ jobs:
       - name: Lancement de la veille
         env:
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           GROQ_KEY: ${{ secrets.GROQ_KEY }}
