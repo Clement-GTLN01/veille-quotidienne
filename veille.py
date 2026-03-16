@@ -1,7 +1,7 @@
 import os
 import requests
 import feedparser
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 
 # Clés API
@@ -13,33 +13,45 @@ NOTION_PAGE_ID = os.environ["NOTION_PAGE_ID"]
 SOURCES = {
     "📈 Bourse & Finance": [
         "https://www.lesechos.fr/rss/rss_finance.xml",
-        "https://www.lefigaro.fr/rss/figaro_economie.xml",
         "https://www.latribune.fr/rss/all.xml",
-        "https://bfmbusiness.bfmtv.com/rss/info/flux-rss/flux-toutes-les-actualites/",
         "https://www.zonebourse.com/rss/actualite.xml",
     ],
     "🌍 Actualité générale": [
         "https://www.lemonde.fr/rss/une.xml",
-        "https://www.lefigaro.fr/rss/figaro_actualites.xml",
         "https://www.franceinfo.fr/rss",
-        "https://www.liberation.fr/arc/outboundfeeds/rss/",
-        "https://www.20minutes.fr/feeds/rss/actu.xml",
+        "https://www.lefigaro.fr/rss/figaro_actualites.xml",
     ],
     "🤖 IA & Tech": [
-        "https://www.01net.com/feed/",
-        "https://www.lebigdata.fr/feed",
-        "https://www.usine-digitale.fr/rss/all.xml",
+        "https://www.technologyreview.com/feed/",
+        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
         "https://siecledigital.fr/feed/",
-        "https://www.bfmtv.com/rss/tech/",
     ],
 }
 
-def recuperer_articles_rss(flux_urls, nb_par_source=2):
+LIMITE_HEURES = 12
+
+def est_recent(entry):
+    try:
+        if hasattr(entry, "published_parsed") and entry.published_parsed:
+            publie = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+            limite = datetime.now(timezone.utc) - timedelta(hours=LIMITE_HEURES)
+            return publie >= limite
+    except Exception:
+        pass
+    return True  # Si pas de date, on garde l'article
+
+def recuperer_articles_rss(flux_urls, nb_par_source=1):
     articles = []
     for url in flux_urls:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:nb_par_source]:
+            nb_ajoutes = 0
+            for entry in feed.entries:
+                if nb_ajoutes >= nb_par_source:
+                    break
+                if not est_recent(entry):
+                    print(f"  Article trop ancien ignore : {entry.get('title', '')[:40]}...")
+                    continue
                 titre = entry.get("title", "Sans titre")
                 resume = entry.get("summary", "")
                 lien = entry.get("link", "")
@@ -49,6 +61,7 @@ def recuperer_articles_rss(flux_urls, nb_par_source=2):
                     "lien": lien,
                     "contenu": None
                 })
+                nb_ajoutes += 1
         except Exception as e:
             print(f"Erreur RSS {url} : {e}")
     return articles
@@ -70,7 +83,7 @@ def recuperer_contenu_article(url):
                 break
         if not contenu:
             contenu = soup.get_text(separator=" ", strip=True)
-        return contenu[:1500] if len(contenu) > 200 else None
+        return contenu[:2000] if len(contenu) > 200 else None
     except Exception as e:
         print(f"Impossible de recuperer {url} : {e}")
         return None
@@ -93,16 +106,20 @@ def formater_pour_groq(articles):
     return texte
 
 def resumer_avec_groq(label, articles):
+    if not articles:
+        return "Aucun article recent trouve dans les dernières 12h pour ce theme."
     texte = formater_pour_groq(articles)
     prompt = (
-        "Tu es un assistant de veille professionnelle pour un professionnel francophone.\n"
-        f"Voici des articles recents sur le theme : {label}\n\n"
+        "Tu es un assistant de veille professionnelle senior pour un cadre francophone.\n"
+        f"Voici {len(articles)} articles recents sur le theme : {label}\n\n"
         f"{texte}\n\n"
-        "Fais un resume structure en 5 points cles. Pour chaque point :\n"
-        "- Une phrase de titre en gras\n"
-        "- 2-3 phrases d'explication concrete sur l'impact business ou utilisateur\n"
-        "- Cite la source avec son lien entre parentheses\n\n"
-        "Sois factuel, precis, sans jargon technique. Pas de generalites."
+        "Pour chacun des articles, redige un paragraphe de 3-4 phrases qui :\n"
+        "- Commence par le titre exact de l'article en gras\n"
+        "- Explique les faits precis (chiffres, noms, dates si disponibles)\n"
+        "- Indique l'impact concret pour un professionnel\n"
+        "- Termine par le lien source entre parentheses\n\n"
+        "IMPORTANT : reste factuel et precis. Pas de generalites. "
+        "Si l'article est en anglais, reponds en francais."
     )
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -111,7 +128,8 @@ def resumer_avec_groq(label, articles):
     }
     body = {
         "model": "llama-3.1-8b-instant",
-        "messages": [{"role": "user", "content": prompt}]
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1500
     }
     res = requests.post(url, headers=headers, json=body)
     data = res.json()
@@ -138,7 +156,6 @@ def envoyer_vers_notion(contenu):
                 "rich_text": [{"type": "text", "text": {"content": label}}]
             }
         })
-        # Découper le texte en morceaux de 1900 caractères max
         morceaux = [texte[i:i+1900] for i in range(0, len(texte), 1900)]
         for morceau in morceaux:
             blocks.append({
@@ -156,16 +173,19 @@ def envoyer_vers_notion(contenu):
     }
     res = requests.patch(url, headers=headers, json={"children": blocks})
     print(f"Notion status : {res.status_code}")
-    print(f"Notion reponse : {res.text}")
-    print("Veille envoyee dans Notion !")
+    if res.status_code != 200:
+        print(f"Notion reponse : {res.text}")
+    else:
+        print("Veille envoyee dans Notion !")
 
 # Programme principal
 contenu = []
 for label, flux_urls in SOURCES.items():
     print(f"\nRecuperation : {label}")
     articles = recuperer_articles_rss(flux_urls)
-    print(f"  {len(articles)} articles recuperes")
-    articles = enrichir_articles(articles)
+    print(f"  {len(articles)} articles recents trouves")
+    if articles:
+        articles = enrichir_articles(articles)
     print(f"  Resume en cours...")
     resume = resumer_avec_groq(label, articles)
     contenu.append((resume, label))
