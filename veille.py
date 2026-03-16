@@ -139,6 +139,25 @@ def resumer_avec_groq(label, articles):
         raise Exception(f"Erreur Groq : {data}")
     return data["choices"][0]["message"]["content"]
 
+def nettoyer_page_notion():
+    print("Nettoyage de la page Notion...")
+    url = f"https://api.notion.com/v1/blocks/{NOTION_PAGE_ID}/children"
+    headers = {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+    res = requests.get(url, headers=headers)
+    blocs = res.json().get("results", [])
+    print(f"  {len(blocs)} blocs a supprimer")
+    for bloc in blocs:
+        bloc_id = bloc["id"]
+        requests.delete(
+            f"https://api.notion.com/v1/blocks/{bloc_id}",
+            headers=headers
+        )
+    print("  Page nettoyee !")
+
 def envoyer_vers_notion(contenu):
     today = date.today().strftime("%d/%m/%Y")
     blocks = [
@@ -183,6 +202,10 @@ def envoyer_vers_notion(contenu):
         print("Veille envoyee dans Notion !")
 
 # Programme principal
+today = date.today()
+if today.day % 2 == 0:
+    nettoyer_page_notion()
+
 contenu = []
 for label, flux_urls in SOURCES.items():
     print(f"\nRecuperation : {label}")
