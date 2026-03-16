@@ -138,13 +138,16 @@ def envoyer_vers_notion(contenu):
                 "rich_text": [{"type": "text", "text": {"content": label}}]
             }
         })
-        blocks.append({
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": texte}}]
-            }
-        })
+        # Découper le texte en morceaux de 1900 caractères max
+        morceaux = [texte[i:i+1900] for i in range(0, len(texte), 1900)]
+        for morceau in morceaux:
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{"type": "text", "text": {"content": morceau}}]
+                }
+            })
     url = f"https://api.notion.com/v1/blocks/{NOTION_PAGE_ID}/children"
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
