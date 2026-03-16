@@ -32,16 +32,17 @@ def resumer_avec_gemini(sujet_label, articles):
     texte_articles = "\n".join(articles)
     prompt = f"""Tu es un assistant de veille professionnelle.
 Voici des titres d'articles récents sur le thème : {sujet_label}
-
 {texte_articles}
-
 Fais un résumé structuré en 5 points clés, en français, orienté impact business et utilisateur.
 Sois concis et direct. Pas de jargon technique."""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     res = requests.post(url, json=body)
-    return res.json()["candidates"][0]["content"]["parts"][0]["text"]
+    data = res.json()
+    if "candidates" not in data:
+        raise Exception(f"Erreur Gemini : {data}")
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def envoyer_vers_notion(contenu):
     today = date.today().strftime("%d/%m/%Y")
