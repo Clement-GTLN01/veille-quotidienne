@@ -1,8 +1,8 @@
 name: Veille quotidienne
 on:
   schedule:
-    - cron: "0 6 * * *"
-  workflow_dispatch:
+    - cron: 0 6 * * *
+  workflow_dispatch: null
 jobs:
   veille:
     runs-on: ubuntu-latest
@@ -20,4 +20,5 @@ jobs:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
-        run: python veille.py
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+run: python veille.py
