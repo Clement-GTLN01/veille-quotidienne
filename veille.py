@@ -60,27 +60,24 @@ def recuperer_contenu_article(url):
         if res.status_code != 200:
             return None
         soup = BeautifulSoup(res.text, "html.parser")
-        # Supprimer les éléments inutiles
         for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
             tag.decompose()
-        # Chercher le contenu principal
         contenu = ""
-        for balise in ["article", "main", ".article-content", ".post-content"]:
+        for balise in ["article", "main"]:
             element = soup.find(balise)
             if element:
                 contenu = element.get_text(separator=" ", strip=True)
                 break
         if not contenu:
             contenu = soup.get_text(separator=" ", strip=True)
-        # Limiter à 1500 caractères
         return contenu[:1500] if len(contenu) > 200 else None
     except Exception as e:
-        print(f"Impossible de récupérer {url} : {e}")
+        print(f"Impossible de recuperer {url} : {e}")
         return None
 
 def enrichir_articles(articles):
     for article in articles:
-        print(f"  Récupération contenu : {article['titre'][:50]}...")
+        print(f"  Contenu : {article['titre'][:50]}...")
         contenu = recuperer_contenu_article(article["lien"])
         article["contenu"] = contenu
     return articles
@@ -92,11 +89,81 @@ def formater_pour_groq(articles):
         if a["contenu"]:
             texte += f"Contenu : {a['contenu']}\n"
         else:
-            texte += f"Résumé : {a['resume']}\n"
-        texte += f"Source : {a['lien']}\n"
+            texte += f"Resume : {a['resume']}\nLien : {a['lien']}\n"
     return texte
 
 def resumer_avec_groq(label, articles):
     texte = formater_pour_groq(articles)
-    prompt = f"""Tu es un assistant de veille professionnelle pour un professionnel francophone.
-Voici des articles récents sur le
+    prompt = (
+        "Tu es un assistant de veille professionnelle pour un professionnel francophone.\n"
+        f"Voici des articles recents sur le theme : {label}\n\n"
+        f"{texte}\n\n"
+        "Fais un resume structure en 5 points cles. Pour chaque point :\n"
+        "- Une phrase de titre en gras\n"
+        "- 2-3 phrases d'explication concrete sur l'impact business ou utilisateur\n"
+        "- Cite la source avec son lien entre parentheses\n\n"
+        "Sois factuel, precis, sans jargon technique. Pas de generalites."
+    )
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_KEY}",
+        "Content-Type": "application/json"
+    }
+    body = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    res = requests.post(url, headers=headers, json=body)
+    data = res.json()
+    if "choices" not in data:
+        raise Exception(f"Erreur Groq : {data}")
+    return data["choices"][0]["message"]["content"]
+
+def envoyer_vers_notion(contenu):
+    today = date.today().strftime("%d/%m/%Y")
+    blocks = [
+        {
+            "object": "block",
+            "type": "heading_1",
+            "heading_1": {
+                "rich_text": [{"type": "text", "text": {"content": f"Veille du {today}"}}]
+            }
+        }
+    ]
+    for texte, label in contenu:
+        blocks.append({
+            "object": "block",
+            "type": "heading_2",
+            "heading_2": {
+                "rich_text": [{"type": "text", "text": {"content": label}}]
+            }
+        })
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [{"type": "text", "text": {"content": texte}}]
+            }
+        })
+    url = f"https://api.notion.com/v1/blocks/{NOTION_PAGE_ID}/children"
+    headers = {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+    res = requests.patch(url, headers=headers, json={"children": blocks})
+    print(f"Notion status : {res.status_code}")
+    print("Veille envoyee dans Notion !")
+
+# Programme principal
+contenu = []
+for label, flux_urls in SOURCES.items():
+    print(f"\nRecuperation : {label}")
+    articles = recuperer_articles_rss(flux_urls)
+    print(f"  {len(articles)} articles recuperes")
+    articles = enrichir_articles(articles)
+    print(f"  Resume en cours...")
+    resume = resumer_avec_groq(label, articles)
+    contenu.append((resume, label))
+
+envoyer_vers_notion(contenu)
