@@ -28,29 +28,31 @@ SOURCES = {
     ],
 }
 
-LIMITE_HEURES = 12
+LIMITE_HEURES = 24
 
 def est_recent(entry):
     try:
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             publie = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
             limite = datetime.now(timezone.utc) - timedelta(hours=LIMITE_HEURES)
+            print(f"    Date article : {publie} | Limite : {limite}")
             return publie >= limite
-    except Exception:
-        pass
-    return True  # Si pas de date, on garde l'article
+    except Exception as e:
+        print(f"    Erreur date : {e}")
+    return True
 
 def recuperer_articles_rss(flux_urls, nb_par_source=1):
     articles = []
     for url in flux_urls:
         try:
             feed = feedparser.parse(url)
+            print(f"  Feed {url} : {len(feed.entries)} entrees trouvees")
             nb_ajoutes = 0
             for entry in feed.entries:
                 if nb_ajoutes >= nb_par_source:
                     break
                 if not est_recent(entry):
-                    print(f"  Article trop ancien ignore : {entry.get('title', '')[:40]}...")
+                    print(f"    Article trop ancien ignore : {entry.get('title', '')[:40]}...")
                     continue
                 titre = entry.get("title", "Sans titre")
                 resume = entry.get("summary", "")
@@ -63,7 +65,7 @@ def recuperer_articles_rss(flux_urls, nb_par_source=1):
                 })
                 nb_ajoutes += 1
         except Exception as e:
-            print(f"Erreur RSS {url} : {e}")
+            print(f"  Erreur RSS {url} : {e}")
     return articles
 
 def recuperer_contenu_article(url):
@@ -85,7 +87,7 @@ def recuperer_contenu_article(url):
             contenu = soup.get_text(separator=" ", strip=True)
         return contenu[:2000] if len(contenu) > 200 else None
     except Exception as e:
-        print(f"Impossible de recuperer {url} : {e}")
+        print(f"  Impossible de recuperer {url} : {e}")
         return None
 
 def enrichir_articles(articles):
@@ -107,7 +109,7 @@ def formater_pour_groq(articles):
 
 def resumer_avec_groq(label, articles):
     if not articles:
-        return "Aucun article recent trouve dans les dernières 12h pour ce theme."
+        return "Aucun article recent trouve dans les dernières 24h pour ce theme."
     texte = formater_pour_groq(articles)
     prompt = (
         "Tu es un assistant de veille professionnelle senior pour un cadre francophone.\n"
@@ -171,8 +173,10 @@ def envoyer_vers_notion(contenu):
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28",
     }
+    print(f"Envoi vers Notion : {len(blocks)} blocs")
     res = requests.patch(url, headers=headers, json={"children": blocks})
     print(f"Notion status : {res.status_code}")
+    print(f"Nombre de blocs envoyes : {len(blocks)}")
     if res.status_code != 200:
         print(f"Notion reponse : {res.text}")
     else:
