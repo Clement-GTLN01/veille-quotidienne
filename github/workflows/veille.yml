@@ -1,0 +1,28 @@
+name: Veille quotidienne
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # 7h heure française (6h UTC)
+  workflow_dispatch:       # permet de lancer manuellement
+
+jobs:
+  veille:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Installation Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Installation des dépendances
+        run: pip install requests
+
+      - name: Lancement de la veille
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+        run: python veille.py
