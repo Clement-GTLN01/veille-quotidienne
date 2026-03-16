@@ -153,6 +153,7 @@ def envoyer_vers_notion(contenu):
     }
     res = requests.patch(url, headers=headers, json={"children": blocks})
     print(f"Notion status : {res.status_code}")
+    print(f"Notion reponse : {res.text}")
     print("Veille envoyee dans Notion !")
 
 # Programme principal
