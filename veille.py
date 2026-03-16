@@ -4,7 +4,7 @@ from datetime import date
 
 # Clés API récupérées depuis les secrets GitHub
 NEWSAPI_KEY = os.environ["NEWSAPI_KEY"]
-GEMINI_KEY = os.environ["GEMINI_KEY"]
+GROQ_KEY = os.environ["GROQ_KEY"]
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 NOTION_PAGE_ID = os.environ["NOTION_PAGE_ID"]
 
@@ -28,7 +28,7 @@ def recuperer_articles(sujet, nb=5):
     articles = res.json().get("articles", [])
     return [f"- {a['title']} ({a['source']['name']})" for a in articles]
 
-def resumer_avec_gemini(sujet_label, articles):
+def resumer_avec_groq(sujet_label, articles):
     texte_articles = "\n".join(articles)
     prompt = f"""Tu es un assistant de veille professionnelle.
 Voici des titres d'articles récents sur le thème : {sujet_label}
@@ -38,7 +38,7 @@ Sois concis et direct. Pas de jargon technique."""
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {os.environ['GROQ_KEY']}",
+        "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json"
     }
     body = {
@@ -53,7 +53,7 @@ Sois concis et direct. Pas de jargon technique."""
 
 def envoyer_vers_notion(contenu):
     today = date.today().strftime("%d/%m/%Y")
-    
+
     blocks = [
         {
             "object": "block",
@@ -95,7 +95,7 @@ for sujet, label in SUJETS:
     print(f"Récupération : {label}")
     articles = recuperer_articles(sujet)
     print(f"Résumé en cours...")
-    resume = resumer_avec_gemini(label, articles)
+    resume = resumer_avec_groq(label, articles)
     contenu.append((resume, label))
 
 envoyer_vers_notion(contenu)
