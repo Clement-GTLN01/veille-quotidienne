@@ -36,13 +36,20 @@ Voici des titres d'articles récents sur le thème : {sujet_label}
 Fais un résumé structuré en 5 points clés, en français, orienté impact business et utilisateur.
 Sois concis et direct. Pas de jargon technique."""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
-    res = requests.post(url, json=body)
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {os.environ['GROQ_KEY']}",
+        "Content-Type": "application/json"
+    }
+    body = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    res = requests.post(url, headers=headers, json=body)
     data = res.json()
-    if "candidates" not in data:
-        raise Exception(f"Erreur Gemini : {data}")
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    if "choices" not in data:
+        raise Exception(f"Erreur Groq : {data}")
+    return data["choices"][0]["message"]["content"]
 
 def envoyer_vers_notion(contenu):
     today = date.today().strftime("%d/%m/%Y")
