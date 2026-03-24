@@ -1,66 +1,54 @@
 import os
 import requests
 import feedparser
-from datetime import date, datetime, timezone, timedelta
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 
 # Clés API
 GROQ_KEY = os.environ["GROQ_KEY"]
-NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-NOTION_PAGE_ID = os.environ["NOTION_PAGE_ID"]
+GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 
-# Flux RSS par thème
-SOURCES = {
-    "📈 Bourse & Finance": [
-        "https://www.lesechos.fr/rss/rss_finance.xml",
-        "https://www.latribune.fr/rss/all.xml",
-        "https://www.zonebourse.com/rss/actualite.xml",
-    ],
-    "🌍 Actualité générale": [
-        "https://www.lemonde.fr/rss/une.xml",
-        "https://www.franceinfo.fr/rss",
-        "https://www.lefigaro.fr/rss/figaro_actualites.xml",
-    ],
-    "🤖 IA & Tech": [
-        "https://www.technologyreview.com/feed/",
-        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-        "https://siecledigital.fr/feed/",
-    ],
-}
+LIMITE_HEURES = 12
 
-LIMITE_HEURES = 24
+# Flux RSS surveillance annonces IA
+SOURCES_ALERTES = [
+    "https://openai.com/blog/rss",
+    "https://www.anthropic.com/news/rss",
+    "https://blog.google/technology/ai/rss",
+    "https://blogs.microsoft.com/blog/feed",
+]
 
 def est_recent(entry):
     try:
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             publie = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
             limite = datetime.now(timezone.utc) - timedelta(hours=LIMITE_HEURES)
-            print(f"    Date article : {publie} | Limite : {limite}")
             return publie >= limite
     except Exception as e:
         print(f"    Erreur date : {e}")
     return True
 
-def recuperer_articles_rss(flux_urls, nb_par_source=1):
+def recuperer_articles_rss(flux_urls, nb_par_source=2):
     articles = []
     for url in flux_urls:
         try:
             feed = feedparser.parse(url)
-            print(f"  Feed {url} : {len(feed.entries)} entrees trouvees")
+            print(f"  Feed {url} : {len(feed.entries)} entrees")
             nb_ajoutes = 0
             for entry in feed.entries:
                 if nb_ajoutes >= nb_par_source:
                     break
                 if not est_recent(entry):
-                    print(f"    Article trop ancien ignore : {entry.get('title', '')[:40]}...")
+                    print(f"    Trop ancien : {entry.get('title', '')[:40]}...")
                     continue
-                titre = entry.get("title", "Sans titre")
-                resume = entry.get("summary", "")
-                lien = entry.get("link", "")
                 articles.append({
-                    "titre": titre,
-                    "resume": resume,
-                    "lien": lien,
+                    "titre": entry.get("title", "Sans titre"),
+                    "resume": entry.get("summary", ""),
+                    "lien": entry.get("link", ""),
                     "contenu": None
                 })
                 nb_ajoutes += 1
@@ -93,11 +81,10 @@ def recuperer_contenu_article(url):
 def enrichir_articles(articles):
     for article in articles:
         print(f"  Contenu : {article['titre'][:50]}...")
-        contenu = recuperer_contenu_article(article["lien"])
-        article["contenu"] = contenu
+        article["contenu"] = recuperer_contenu_article(article["lien"])
     return articles
 
-def formater_pour_groq(articles):
+def resumer_avec_groq(articles):
     texte = ""
     for a in articles:
         texte += f"\n---\nTitre : {a['titre']}\n"
@@ -105,23 +92,16 @@ def formater_pour_groq(articles):
             texte += f"Contenu : {a['contenu']}\n"
         else:
             texte += f"Resume : {a['resume']}\nLien : {a['lien']}\n"
-    return texte
-
-def resumer_avec_groq(label, articles):
-    if not articles:
-        return "Aucun article recent trouve dans les dernières 24h pour ce theme."
-    texte = formater_pour_groq(articles)
     prompt = (
-        "Tu es un assistant de veille professionnelle senior pour un cadre francophone.\n"
-        f"Voici {len(articles)} articles recents sur le theme : {label}\n\n"
+        "Tu es un assistant de veille IA pour un professionnel francophone.\n"
+        f"Voici {len(articles)} annonces recentes de Google, Anthropic, Microsoft ou OpenAI.\n\n"
         f"{texte}\n\n"
-        "Pour chacun des articles, redige un paragraphe de 3-4 phrases qui :\n"
-        "- Commence par le titre exact de l'article en gras\n"
-        "- Explique les faits precis (chiffres, noms, dates si disponibles)\n"
+        "Pour chaque annonce, redige un paragraphe de 3-4 phrases qui :\n"
+        "- Commence par le nom de l'entreprise et le titre en gras\n"
+        "- Explique les faits precis (chiffres, noms, dates)\n"
         "- Indique l'impact concret pour un professionnel\n"
         "- Termine par le lien source entre parentheses\n\n"
-        "IMPORTANT : reste factuel et precis. Pas de generalites. "
-        "Si l'article est en anglais, reponds en francais."
+        "Sois factuel et precis. Si l'article est en anglais, reponds en francais."
     )
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -139,82 +119,31 @@ def resumer_avec_groq(label, articles):
         raise Exception(f"Erreur Groq : {data}")
     return data["choices"][0]["message"]["content"]
 
-def nettoyer_page_notion():
-    print("Nettoyage de la page Notion...")
-    url = f"https://api.notion.com/v1/blocks/{NOTION_PAGE_ID}/children"
-    headers = {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28",
-    }
-    res = requests.get(url, headers=headers)
-    blocs = res.json().get("results", [])
-    print(f"  {len(blocs)} blocs a supprimer")
-    for bloc in blocs:
-        bloc_id = bloc["id"]
-        requests.delete(
-            f"https://api.notion.com/v1/blocks/{bloc_id}",
-            headers=headers
-        )
-    print("  Page nettoyee !")
-
-def envoyer_vers_notion(contenu):
-    today = date.today().strftime("%d/%m/%Y")
-    blocks = [
-        {
-            "object": "block",
-            "type": "heading_1",
-            "heading_1": {
-                "rich_text": [{"type": "text", "text": {"content": f"Veille du {today}"}}]
-            }
-        }
-    ]
-    for texte, label in contenu:
-        blocks.append({
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": {
-                "rich_text": [{"type": "text", "text": {"content": label}}]
-            }
-        })
-        morceaux = [texte[i:i+1900] for i in range(0, len(texte), 1900)]
-        for morceau in morceaux:
-            blocks.append({
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [{"type": "text", "text": {"content": morceau}}]
-                }
-            })
-    url = f"https://api.notion.com/v1/blocks/{NOTION_PAGE_ID}/children"
-    headers = {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28",
-    }
-    print(f"Envoi vers Notion : {len(blocks)} blocs")
-    res = requests.patch(url, headers=headers, json={"children": blocks})
-    print(f"Notion status : {res.status_code}")
-    print(f"Nombre de blocs envoyes : {len(blocks)}")
-    if res.status_code != 200:
-        print(f"Notion reponse : {res.text}")
-    else:
-        print("Veille envoyee dans Notion !")
+def envoyer_email_alerte(articles, resume):
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    sujet = f"🚨 Alerte IA — {len(articles)} nouvelle(s) annonce(s) ({now})"
+    corps = "Nouvelles annonces détectées chez Google, Anthropic, Microsoft ou OpenAI :\n\n"
+    for a in articles:
+        corps += f"• {a['titre']}\n  {a['lien']}\n\n"
+    corps += f"\n---\nRésumé :\n\n{resume}"
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = GMAIL_ADDRESS
+    msg["Subject"] = sujet
+    msg.attach(MIMEText(corps, "plain"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+    print("Email alerte envoye !")
 
 # Programme principal
-today = date.today()
-if today.day % 2 == 0:
-    nettoyer_page_notion()
+print("Verification annonces IA (dernières 12h)...")
+articles = recuperer_articles_rss(SOURCES_ALERTES)
+print(f"{len(articles)} annonces recentes trouvees")
 
-contenu = []
-for label, flux_urls in SOURCES.items():
-    print(f"\nRecuperation : {label}")
-    articles = recuperer_articles_rss(flux_urls)
-    print(f"  {len(articles)} articles recents trouves")
-    if articles:
-        articles = enrichir_articles(articles)
-    print(f"  Resume en cours...")
-    resume = resumer_avec_groq(label, articles)
-    contenu.append((resume, label))
-
-envoyer_vers_notion(contenu)
+if articles:
+    articles = enrichir_articles(articles)
+    resume = resumer_avec_groq(articles)
+    envoyer_email_alerte(articles, resume)
+else:
+    print("Aucune nouvelle annonce — pas d'email envoye.")
