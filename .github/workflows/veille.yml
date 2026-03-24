@@ -17,8 +17,6 @@ jobs:
         run: pip install requests feedparser beautifulsoup4
       - name: Lancement de la veille
         env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
           GROQ_KEY: ${{ secrets.GROQ_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
